@@ -67,6 +67,7 @@ ffmpeg -version >nul 2>&1
 if errorlevel 1 (
     echo [NOTE] FFmpeg not found - voice input disabled.
     echo        Install with: winget install ffmpeg
+    echo                  or: choco install ffmpeg
     echo.
 )
 

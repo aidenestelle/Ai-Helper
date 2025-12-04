@@ -37,14 +37,23 @@ Then double-click **`setup.bat`** - it handles everything automatically!
 ```bash
 git clone https://github.com/aidenestelle/Ai-Helper.git
 cd helper-ai
+
+# Option A: Using venv
 python -m venv .venv
 .venv\Scripts\activate  # Windows
+
+# Option B: Using conda
+conda create -n helper-ai python=3.11
+conda activate helper-ai
+
+# Then install dependencies
 pip install -r requirements.txt
 ```
 
 #### 2. Install FFmpeg (for voice input)
 
-- **Windows**: `winget install ffmpeg`
+- **Windows (winget)**: `winget install ffmpeg`
+- **Windows (choco)**: `choco install ffmpeg`
 - **Mac**: `brew install ffmpeg`
 - **Linux**: `sudo apt install ffmpeg`
 
