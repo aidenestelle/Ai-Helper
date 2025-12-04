@@ -29,21 +29,34 @@ A sleek desktop overlay tool for quick AI queries with screenshot context, voice
 
 ## 🚀 Quick Start
 
-### 1. Clone & Install
+### Option A: One-Click Setup (Windows)
 
 ```bash
 git clone https://github.com/yourusername/helper-ai.git
 cd helper-ai
+```
+
+Then double-click **`setup.bat`** - it handles everything automatically!
+
+### Option B: Manual Install
+
+#### 1. Clone & Install
+
+```bash
+git clone https://github.com/yourusername/helper-ai.git
+cd helper-ai
+python -m venv .venv
+.venv\Scripts\activate  # Windows
 pip install -r requirements.txt
 ```
 
-### 2. Install FFmpeg (for voice input)
+#### 2. Install FFmpeg (for voice input)
 
 - **Windows**: `winget install ffmpeg`
 - **Mac**: `brew install ffmpeg`
 - **Linux**: `sudo apt install ffmpeg`
 
-### 3. Configure
+#### 3. Configure
 
 Edit `config.py` and set your n8n webhook URL:
 
@@ -51,13 +64,35 @@ Edit `config.py` and set your n8n webhook URL:
 WEBHOOK_URL = "https://your-n8n-instance.com/webhook/your-endpoint"
 ```
 
-### 4. Run
+#### 4. Run
 
 ```bash
 python main.py
 ```
 
 Press `F2` to toggle the overlay!
+
+## 📜 Scripts (Windows)
+
+| Script | Description |
+|--------|-------------|
+| `setup.bat` | **First time?** One-click install + launch |
+| `start.bat` | Launch the app (after initial setup) |
+| `install.bat` | Install/update dependencies only |
+| `build.bat` | Build standalone `.exe` (see below) |
+
+## 📦 Build Standalone Executable
+
+Create a portable executable that runs without Python installed:
+
+```bash
+# Run build.bat or:
+.venv\Scripts\activate
+pip install pyinstaller
+pyinstaller --onedir --windowed --name "HelperAI" main.py
+```
+
+The executable will be created in `dist\HelperAI\`. You can copy this entire folder anywhere and run `HelperAI.exe`.
 
 ## ⚙️ Settings
 
@@ -99,7 +134,11 @@ helper-ai/
 ├── screenshot_utils.py  # Multi-monitor capture
 ├── voice_utils.py       # Whisper transcription
 ├── n8n_client.py        # Webhook integration
-└── n8n-workflow.json    # Example n8n workflow
+├── n8n-workflow.json    # Example n8n workflow
+├── setup.bat            # One-click setup script
+├── start.bat            # Launch script
+├── install.bat          # Dependency installer
+└── build.bat            # Executable builder
 ```
 
 ## 🛠️ Requirements

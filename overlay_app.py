@@ -58,14 +58,14 @@ class OverlayApp(ctk.CTk):
         )
         self.new_chat_btn.grid(row=0, column=0, sticky="w")
 
-        # Right: History + Settings
+        # Right: History + Settings + Hide + Close
         self.right_toolbar = ctk.CTkFrame(self.toolbar_frame, fg_color="transparent")
         self.right_toolbar.grid(row=0, column=2, sticky="e")
 
         self.history_btn = ctk.CTkButton(
-            self.right_toolbar, 
-            text="History", 
-            width=70, 
+            self.right_toolbar,
+            text="History",
+            width=70,
             height=28,
             font=("Arial", 12),
             fg_color="transparent",
@@ -75,13 +75,35 @@ class OverlayApp(ctk.CTk):
         self.history_btn.pack(side="left", padx=(0, 5))
 
         self.settings_btn = ctk.CTkButton(
-            self.right_toolbar, 
-            text="⚙", 
-            width=28, 
-            height=28, 
+            self.right_toolbar,
+            text="⚙",
+            width=28,
+            height=28,
             command=self.open_settings
         )
-        self.settings_btn.pack(side="left")
+        self.settings_btn.pack(side="left", padx=(0, 5))
+
+        self.hide_btn = ctk.CTkButton(
+            self.right_toolbar,
+            text="👁",
+            width=28,
+            height=28,
+            fg_color="gray30",
+            hover_color="gray40",
+            command=self.hide_overlay
+        )
+        self.hide_btn.pack(side="left", padx=(0, 5))
+
+        self.close_btn = ctk.CTkButton(
+            self.right_toolbar,
+            text="✕",
+            width=28,
+            height=28,
+            fg_color="#dc3545",
+            hover_color="#c82333",
+            command=self.close_app
+        )
+        self.close_btn.pack(side="left")
 
         # ============ ROW 1: INPUT WITH EMBEDDED SEND ============
         self.input_frame = ctk.CTkFrame(self, corner_radius=10)
@@ -157,11 +179,12 @@ class OverlayApp(ctk.CTk):
             font=("Arial", 11)
         )
         self.monitor_menu.grid(row=0, column=1, padx=10)
-        
-        # Bind hover events for highlight
-        self.monitor_menu.bind("<Enter>", self.show_monitor_highlight)
-        self.monitor_menu.bind("<Leave>", self.hide_monitor_highlight)
+
         self.highlight_window = None
+        self._dropdown_bindings_set = False
+
+        # Bind to detect when dropdown opens
+        self.monitor_menu.bind("<Button-1>", self._on_dropdown_click)
 
         # Right: Screenshot Toggle
         self.screenshot_var = ctk.BooleanVar(value=settings_manager.get_include_screenshot())
@@ -189,6 +212,7 @@ class OverlayApp(ctk.CTk):
         self.settings_window = None
         self.history_window = None
         self.current_session_id = None
+        self.chat_messages = []  # Track current conversation
         self.voice_hotkey_id = None
         self.withdraw() # Start hidden
         
@@ -265,45 +289,79 @@ class OverlayApp(ctk.CTk):
         self.show_monitor_highlight(None)
         self.after(500, self.hide_monitor_highlight)
 
-    def show_monitor_highlight(self, event=None):
-        """Show highlight border around selected monitor."""
-        if self.highlight_window and self.highlight_window.winfo_exists():
-            return  # Already showing
-            
-        selected_name = self.monitor_var.get()
-        monitor_index = self.monitor_map.get(selected_name, 1)
+    def _on_dropdown_click(self, event=None):
+        """Handle dropdown click - bind hover events to dropdown options after a delay."""
+        # Small delay to let dropdown render
+        self.after(50, self._bind_dropdown_hover_events)
+
+    def _bind_dropdown_hover_events(self):
+        """Bind hover events to each dropdown option."""
+        try:
+            # Access the internal dropdown menu
+            dropdown = self.monitor_menu._dropdown_menu
+            if dropdown and dropdown.winfo_exists():
+                # Get all button widgets in the dropdown
+                for child in dropdown.winfo_children():
+                    # The dropdown contains a frame with buttons
+                    if hasattr(child, 'winfo_children'):
+                        for button in child.winfo_children():
+                            if hasattr(button, 'cget'):
+                                try:
+                                    text = button.cget("text")
+                                    if text in self.monitor_names:
+                                        button.bind("<Enter>", lambda e, name=text: self.show_monitor_highlight_for(name))
+                                        button.bind("<Leave>", self.hide_monitor_highlight)
+                                except:
+                                    pass
+
+                # Also bind to dropdown closing
+                dropdown.bind("<Unmap>", self.hide_monitor_highlight)
+        except Exception as e:
+            pass  # Dropdown might not exist yet
+
+    def show_monitor_highlight_for(self, monitor_name):
+        """Show highlight border around a specific monitor by name."""
+        # First hide any existing highlight
+        self.hide_monitor_highlight()
+
+        monitor_index = self.monitor_map.get(monitor_name, 1)
         bounds = screenshot_utils.get_monitor_bounds(monitor_index)
-        
+
         if not bounds:
             return
-        
+
         # Create transparent window with colored border
         self.highlight_window = ctk.CTkToplevel(self)
         self.highlight_window.overrideredirect(True)
         self.highlight_window.attributes("-topmost", True)
         self.highlight_window.attributes("-alpha", 0.3)
-        
-        # Position at monitor bounds with slight inset
+
+        # Position at monitor bounds
         border = 8
         self.highlight_window.geometry(
             f"{bounds['width']}x{bounds['height']}+{bounds['left']}+{bounds['top']}"
         )
-        
+
         # Create colored frame as border
         frame = ctk.CTkFrame(
-            self.highlight_window, 
+            self.highlight_window,
             fg_color="#00CED1",  # Teal
             corner_radius=0
         )
         frame.pack(fill="both", expand=True)
-        
+
         # Inner transparent area
         inner = ctk.CTkFrame(
-            frame, 
+            frame,
             fg_color="#1a1a1a",
             corner_radius=0
         )
         inner.pack(fill="both", expand=True, padx=border, pady=border)
+
+    def show_monitor_highlight(self, event=None):
+        """Show highlight border around selected monitor."""
+        selected_name = self.monitor_var.get()
+        self.show_monitor_highlight_for(selected_name)
 
     def hide_monitor_highlight(self, event=None):
         """Hide the monitor highlight."""
@@ -365,6 +423,10 @@ class OverlayApp(ctk.CTk):
             self.history_window.destroy()
             self.history_window = None
 
+    def close_app(self):
+        """Close the application completely."""
+        self.destroy()
+
     def reset_ui(self):
         self.geometry(f"{config.WINDOW_WIDTH}x{config.WINDOW_HEIGHT_INITIAL}")
         self.result_frame.grid_forget()
@@ -377,6 +439,7 @@ class OverlayApp(ctk.CTk):
 
     def new_chat(self):
         self.current_session_id = None
+        self.chat_messages = []
         self.entry.delete(0, 'end')
         self.result_textbox.configure(state="normal")
         self.result_textbox.delete("0.0", "end")
@@ -387,11 +450,15 @@ class OverlayApp(ctk.CTk):
         query = self.entry.get()
         if not query:
             return
-            
+
         complexity = self.complexity_var.get()
-        
+
         if not self.current_session_id:
             self.current_session_id = settings_manager.create_session()
+
+        # Add user message to chat immediately
+        self.chat_messages.append({"role": "user", "content": query})
+        self.display_chat()
 
         include_screenshot = self.screenshot_var.get()
         screenshot_bytes = None
@@ -444,27 +511,51 @@ class OverlayApp(ctk.CTk):
     def show_result(self, text, is_error=False):
         self.progress_bar.stop()
         self.progress_bar.grid_forget()
-        
-        self.geometry(f"{config.WINDOW_WIDTH}x{config.WINDOW_HEIGHT_EXPANDED}")
-        self.result_frame.grid(row=3, column=0, sticky="nsew", padx=15, pady=(5, 15))
-        
-        self.result_textbox.configure(state="normal")
-        self.result_textbox.delete("0.0", "end")
-        self.result_textbox.insert("0.0", text)
-        self.result_textbox.configure(state="disabled")
-        
+
+        # Add assistant response to chat messages
+        if not is_error:
+            self.chat_messages.append({"role": "assistant", "content": text})
+
+        self.display_chat()
+
         if is_error:
             self.retry_btn.pack(pady=5)
         else:
             self.retry_btn.pack_forget()
-        
+
         self.entry.configure(state="normal")
         self.send_btn.configure(state="normal", text="➤")
         self.entry.focus_set()
-        # Clear entry after success? Maybe keep it for follow up?
-        # Let's clear it to allow new question
+        # Clear entry to allow follow-up question
         if not is_error:
             self.entry.delete(0, 'end')
+
+    def display_chat(self):
+        """Display the full chat conversation."""
+        self.geometry(f"{config.WINDOW_WIDTH}x{config.WINDOW_HEIGHT_EXPANDED}")
+        self.result_frame.grid(row=3, column=0, sticky="nsew", padx=15, pady=(5, 15))
+
+        self.result_textbox.configure(state="normal")
+        self.result_textbox.delete("0.0", "end")
+
+        for msg in self.chat_messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+
+            if role == "user":
+                self.result_textbox.insert("end", "You: ", "user_label")
+                self.result_textbox.insert("end", f"{content}\n\n")
+            else:
+                self.result_textbox.insert("end", "AI: ", "ai_label")
+                self.result_textbox.insert("end", f"{content}\n\n")
+
+        # Configure tags for styling
+        self.result_textbox.tag_config("user_label", foreground="#4da6ff")
+        self.result_textbox.tag_config("ai_label", foreground="#50fa7b")
+
+        self.result_textbox.configure(state="disabled")
+        # Scroll to bottom
+        self.result_textbox.see("end")
 
     def open_settings(self):
         if self.settings_window is not None and self.settings_window.winfo_exists():
@@ -592,4 +683,26 @@ class OverlayApp(ctk.CTk):
             self._history_pos = (self.history_window.winfo_x(), self.history_window.winfo_y())
             self.history_window.destroy()
             self.history_window = None
+
+    def load_session(self, session_id, history_window=None):
+        """Load a previous session and display its messages."""
+        self.current_session_id = session_id
+        self.chat_messages = settings_manager.get_session_messages(session_id)
+        self.display_chat()
+        self.entry.delete(0, 'end')
+        self.entry.focus_set()
+        # Close history window
+        if history_window and history_window.winfo_exists():
+            self.close_history()
+
+    def delete_session_ui(self, session_id, history_window):
+        """Delete a session and refresh the history window."""
+        settings_manager.delete_session(session_id)
+        # If we deleted the current session, reset
+        if self.current_session_id == session_id:
+            self.new_chat()
+        # Refresh history window
+        if history_window and history_window.winfo_exists():
+            self.close_history()
+            self.show_history()
 
