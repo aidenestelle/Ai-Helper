@@ -6,6 +6,7 @@ import screenshot_utils
 import n8n_client
 import settings_manager
 import voice_utils
+import tts_utils
 
 
 class HotkeyCapture(ctk.CTkFrame):
@@ -278,8 +279,9 @@ class OverlayApp(ctk.CTk):
             command=self.on_submit
         )
         self.send_btn.grid(row=0, column=2, padx=5, pady=5)
-        
+
         self.is_recording = False
+        self.is_ptt_recording = False  # Track push-to-talk for auto-send
 
         # ============ ROW 2: BOTTOM CONTROLS ============
         self.controls_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -287,10 +289,10 @@ class OverlayApp(ctk.CTk):
         self.controls_frame.grid_columnconfigure(1, weight=1)  # Spacer
 
         # Left: Complexity Segmented Button
-        self.complexity_var = ctk.StringVar(value="Mid")
+        self.complexity_var = ctk.StringVar(value="Low")
         self.complexity_segment = ctk.CTkSegmentedButton(
             self.controls_frame,
-            values=["Low", "Mid", "High"],
+            values=["Low", "High"],
             variable=self.complexity_var,
             font=("Arial", 12)
         )
@@ -392,6 +394,7 @@ class OverlayApp(ctk.CTk):
 
     def _start_ptt_recording(self):
         self.is_recording = True
+        self.is_ptt_recording = True  # Track that this is PTT mode
         self.mic_btn.configure(fg_color="red", text="⏹")
         self.entry.configure(placeholder_text="Listening...")
         voice_utils.start_recording(callback=self.on_transcription)
@@ -527,10 +530,12 @@ class OverlayApp(ctk.CTk):
         self.after(0, self._update_after_transcription, text, error)
 
     def _update_after_transcription(self, text, error):
+        was_ptt = self.is_ptt_recording
         self.is_recording = False
+        self.is_ptt_recording = False
         self.mic_btn.configure(fg_color="gray30", text="🎤")
         self.entry.configure(placeholder_text="Ask a question...")
-        
+
         if error:
             self.entry.delete(0, 'end')
             self.entry.insert(0, f"[Mic Error: {error}]")
@@ -541,6 +546,10 @@ class OverlayApp(ctk.CTk):
             else:
                 self.entry.insert(0, text)
             self.entry.focus_set()
+
+            # Auto-send if this was push-to-talk mode
+            if was_ptt and text.strip():
+                self.after(100, self.on_submit)
 
     def show_overlay(self):
         self.deiconify()
@@ -669,6 +678,30 @@ class OverlayApp(ctk.CTk):
         if not is_error:
             self.entry.delete(0, 'end')
 
+        # Play TTS if enabled and not an error
+        if not is_error and settings_manager.get_tts_enabled():
+            self._play_tts(text)
+
+    def _play_tts(self, text):
+        """Play text-to-speech for the given text."""
+        voice = settings_manager.get_tts_voice()
+        speed = settings_manager.get_tts_speed()
+
+        def on_tts_complete(error):
+            if error:
+                print(f"TTS Error: {error}")
+
+        tts_utils.speak(
+            text=text,
+            voice=voice,
+            speed=speed,
+            callback=on_tts_complete
+        )
+
+    def stop_tts(self):
+        """Stop any ongoing TTS playback."""
+        tts_utils.stop()
+
     def display_chat(self):
         """Display the full chat conversation."""
         self.geometry(f"{config.WINDOW_WIDTH}x{config.WINDOW_HEIGHT_EXPANDED}")
@@ -704,13 +737,14 @@ class OverlayApp(ctk.CTk):
 
         self.settings_window = ctk.CTkToplevel(self)
         self.settings_window.title("Settings")
-        self.settings_window.geometry("420x400")
+        self.settings_window.geometry("420x600")
+        self.settings_window.minsize(420, 400)
         self.settings_window.attributes("-topmost", True)
         self.settings_window.protocol("WM_DELETE_WINDOW", self.close_settings)
 
-        # Content frame with padding
-        content = ctk.CTkFrame(self.settings_window, fg_color="transparent")
-        content.pack(fill="both", expand=True, padx=20, pady=10)
+        # Scrollable content frame
+        content = ctk.CTkScrollableFrame(self.settings_window, fg_color="transparent")
+        content.pack(fill="both", expand=True, padx=10, pady=10)
 
         # Overlay Hotkey with capture widget
         ctk.CTkLabel(content, text="Overlay Hotkey:", anchor="w").pack(fill="x", pady=(10, 5))
@@ -738,6 +772,64 @@ class OverlayApp(ctk.CTk):
         voice_hotkey_capture = HotkeyCapture(content, initial_value=settings_manager.get_voice_hotkey())
         voice_hotkey_capture.pack(fill="x", pady=(0, 10))
 
+        # TTS Settings Section
+        tts_separator = ctk.CTkFrame(content, height=2, fg_color="gray50")
+        tts_separator.pack(fill="x", pady=(10, 10))
+
+        ctk.CTkLabel(content, text="Text-to-Speech", anchor="w", font=("Arial", 14, "bold")).pack(fill="x", pady=(0, 5))
+
+        # TTS Enable Toggle
+        tts_enabled_var = ctk.BooleanVar(value=settings_manager.get_tts_enabled())
+        tts_switch = ctk.CTkSwitch(
+            content,
+            text="Enable TTS (speak AI responses)",
+            variable=tts_enabled_var
+        )
+        tts_switch.pack(fill="x", pady=(0, 10))
+
+        # Voice selection
+        ctk.CTkLabel(content, text="Voice:", anchor="w").pack(fill="x", pady=(5, 5))
+        tts_voice_var = ctk.StringVar(value=settings_manager.get_tts_voice())
+        voice_menu = ctk.CTkOptionMenu(
+            content,
+            values=["jenny", "guy", "aria", "davis", "jane", "jason", "sara", "tony", "nancy"],
+            variable=tts_voice_var
+        )
+        voice_menu.pack(fill="x", pady=(0, 10))
+
+        # Speed slider
+        ctk.CTkLabel(content, text="Speed:", anchor="w").pack(fill="x", pady=(5, 5))
+
+        speed_frame = ctk.CTkFrame(content, fg_color="transparent")
+        speed_frame.pack(fill="x", pady=(0, 10))
+        speed_frame.grid_columnconfigure(0, weight=1)
+
+        tts_speed_var = ctk.DoubleVar(value=settings_manager.get_tts_speed())
+        speed_label = ctk.CTkLabel(speed_frame, text=f"{tts_speed_var.get():.2f}x", width=50)
+        speed_label.grid(row=0, column=1, padx=(10, 0))
+
+        def update_speed_label(val):
+            speed_label.configure(text=f"{float(val):.2f}x")
+
+        speed_slider = ctk.CTkSlider(
+            speed_frame,
+            from_=0.5,
+            to=2.0,
+            variable=tts_speed_var,
+            command=update_speed_label
+        )
+        speed_slider.grid(row=0, column=0, sticky="ew")
+
+        # Speed description
+        speed_desc = ctk.CTkLabel(
+            content,
+            text="0.5x = slow, 1.0x = normal, 2.0x = fast",
+            anchor="w",
+            font=("Arial", 10),
+            text_color="gray"
+        )
+        speed_desc.pack(fill="x", pady=(0, 10))
+
         def save():
             new_hotkey = hotkey_capture.get()
             new_url = url_entry.get()
@@ -749,6 +841,11 @@ class OverlayApp(ctk.CTk):
             settings_manager.set_voice_mode(new_voice_mode)
             settings_manager.set_voice_hotkey(new_voice_hotkey)
 
+            # Save TTS settings
+            settings_manager.set_tts_enabled(tts_enabled_var.get())
+            settings_manager.set_tts_voice(tts_voice_var.get())
+            settings_manager.set_tts_speed(tts_speed_var.get())
+
             if self.update_hotkey_callback:
                 self.update_hotkey_callback(new_hotkey)
 
@@ -757,7 +854,14 @@ class OverlayApp(ctk.CTk):
 
             self.close_settings()
 
-        ctk.CTkButton(content, text="Save", command=save).pack(pady=20)
+        save_btn = ctk.CTkButton(
+            content,
+            text="Save",
+            command=save,
+            font=("Arial", 14, "bold"),
+            height=40
+        )
+        save_btn.pack(fill="x", pady=20)
 
     def close_settings(self):
         if self.settings_window:

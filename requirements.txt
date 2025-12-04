@@ -7,3 +7,6 @@ openai-whisper
 sounddevice
 numpy
 scipy
+# TTS dependencies
+edge-tts
+pygame

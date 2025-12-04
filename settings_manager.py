@@ -14,7 +14,11 @@ DEFAULT_SETTINGS = {
     "voice_mode": "toggle",  # "toggle" or "push_to_talk"
     "voice_hotkey": "ctrl+shift+v",
     "sessions": {},
-    "setup_complete": False
+    "setup_complete": False,
+    # TTS Settings
+    "tts_enabled": False,
+    "tts_voice": "jenny",  # Voice name (jenny, guy, aria, etc.)
+    "tts_speed": 1.25  # Speech speed multiplier (0.5 to 2.0)
 }
 
 def load_settings():
@@ -44,6 +48,13 @@ def load_settings():
                 # Existing users who have settings already should not see first-run
                 settings["setup_complete"] = True
                 save_settings(settings)
+            # TTS settings
+            if "tts_enabled" not in settings:
+                settings["tts_enabled"] = False
+            if "tts_voice" not in settings:
+                settings["tts_voice"] = "jenny"
+            if "tts_speed" not in settings:
+                settings["tts_speed"] = 1.25
             return settings
     except Exception as e:
         print(f"Error loading settings: {e}")
@@ -164,4 +175,29 @@ def set_setup_complete(complete=True):
     """Mark initial setup as complete."""
     settings = load_settings()
     settings["setup_complete"] = complete
+    save_settings(settings)
+
+# TTS Settings
+def get_tts_enabled():
+    return load_settings().get("tts_enabled", False)
+
+def set_tts_enabled(enabled):
+    settings = load_settings()
+    settings["tts_enabled"] = enabled
+    save_settings(settings)
+
+def get_tts_voice():
+    return load_settings().get("tts_voice", "jenny")
+
+def set_tts_voice(voice):
+    settings = load_settings()
+    settings["tts_voice"] = voice
+    save_settings(settings)
+
+def get_tts_speed():
+    return load_settings().get("tts_speed", 1.25)
+
+def set_tts_speed(speed):
+    settings = load_settings()
+    settings["tts_speed"] = speed
     save_settings(settings)

@@ -69,28 +69,11 @@ echo [*] Building executable...
 echo    This may take a few minutes...
 echo.
 
-:: Check for Anaconda DLLs
-set CONDA_BIN=F:\anaconda\Library\bin
-if exist "!CONDA_BIN!\ffi-8.dll" (
-    echo [OK] Found Anaconda DLLs - will bundle them
-) else (
-    echo [WARNING] Anaconda DLLs not found at !CONDA_BIN!
-)
-
 :: Use --onedir mode for better compatibility
-:: Include all required Anaconda DLLs directly
+:: PyInstaller will automatically collect required DLLs from Python environment
 pyinstaller --noconfirm --onedir --windowed ^
     --name "HelperAI" ^
     --add-data "config.py;." ^
-    --add-binary "F:\anaconda\Library\bin\ffi-8.dll;." ^
-    --add-binary "F:\anaconda\Library\bin\ffi.dll;." ^
-    --add-binary "F:\anaconda\Library\bin\tcl86t.dll;." ^
-    --add-binary "F:\anaconda\Library\bin\tk86t.dll;." ^
-    --add-binary "F:\anaconda\Library\bin\liblzma.dll;." ^
-    --add-binary "F:\anaconda\Library\bin\libbz2.dll;." ^
-    --add-binary "F:\anaconda\Library\bin\libcrypto-3-x64.dll;." ^
-    --add-binary "F:\anaconda\Library\bin\libssl-3-x64.dll;." ^
-    --add-binary "F:\anaconda\Library\bin\libexpat.dll;." ^
     --hidden-import "customtkinter" ^
     --hidden-import "PIL" ^
     --hidden-import "PIL._tkinter_finder" ^
@@ -108,10 +91,14 @@ pyinstaller --noconfirm --onedir --windowed ^
     --hidden-import "keyboard._winkeyboard" ^
     --hidden-import "tiktoken_ext" ^
     --hidden-import "tiktoken_ext.openai_public" ^
+    --hidden-import "edge_tts" ^
+    --hidden-import "pygame" ^
     --collect-all "customtkinter" ^
     --collect-all "whisper" ^
     --collect-all "keyboard" ^
     --collect-all "PIL" ^
+    --collect-all "edge_tts" ^
+    --collect-all "pygame" ^
     --collect-binaries "numpy" ^
     --collect-binaries "ctypes" ^
     --collect-binaries "PIL" ^

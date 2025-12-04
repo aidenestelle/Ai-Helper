@@ -11,6 +11,7 @@ A sleek desktop overlay tool for quick AI queries with screenshot context, voice
 - **🎯 Quick Access Overlay** - Press `F2` (configurable) to summon a floating overlay anywhere
 - **📸 Multi-Monitor Screenshot** - Capture any screen with visual selection and hover highlighting
 - **🎤 Voice Input** - Push-to-talk or toggle mode with OpenAI Whisper transcription
+- **🔊 Text-to-Speech** - AI responses spoken aloud using Microsoft Edge neural voices
 - **💬 Session Memory** - Conversations are grouped into sessions with full history
 - **⚡ Complexity Levels** - Route queries to different AI models (Low/Mid/High)
 - **🔧 n8n Integration** - Connect to your own AI workflow via webhook
@@ -40,7 +41,7 @@ cd helper-ai
 
 # Option A: Using venv
 python -m venv .venv
-.venv\Scripts\activate  # Windows
+source .venv/Scripts/activate && pip install -r requirements.txt  # Windows
 
 # Option B: Using conda
 conda create -n helper-ai python=3.11
@@ -105,6 +106,10 @@ Click the ⚙ button to configure:
 | Webhook URL | Your n8n webhook endpoint |
 | Voice Mode | `toggle` or `push_to_talk` |
 | Voice Hotkey | Key for voice input (default: `ctrl+shift+v`) |
+| **TTS Settings** | |
+| Enable TTS | Toggle AI voice responses on/off |
+| Voice | Choose from 9 Microsoft neural voices (jenny, guy, aria, etc.) |
+| Speed | Adjust speech rate from 0.5x to 2.0x |
 
 ## 🔗 n8n Workflow
 
@@ -134,6 +139,7 @@ helper-ai/
 ├── settings_manager.py  # Persistent settings
 ├── screenshot_utils.py  # Multi-monitor capture
 ├── voice_utils.py       # Whisper transcription
+├── tts_utils.py         # Text-to-speech (Edge TTS)
 ├── n8n_client.py        # Webhook integration
 ├── n8n-workflow.json    # Example n8n workflow
 ├── setup.bat            # One-click setup script
@@ -146,8 +152,9 @@ helper-ai/
 
 - Python 3.8+
 - customtkinter, Pillow, requests, keyboard, mss
-- openai-whisper, sounddevice, scipy (for voice)
-- FFmpeg (for voice)
+- openai-whisper, sounddevice, scipy (for voice input)
+- edge-tts, pygame (for text-to-speech)
+- FFmpeg (for voice input)
 
 ## 📝 License
 
