@@ -1,0 +1,9 @@
+customtkinter
+Pillow
+requests
+keyboard
+mss
+openai-whisper
+sounddevice
+numpy
+scipy
