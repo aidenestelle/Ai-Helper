@@ -3,7 +3,8 @@
     "allow": [
       "Bash(git branch:*)",
       "Bash(git remote add:*)",
-      "Bash(dir:*)"
+      "Bash(dir:*)",
+      "Bash(git add:*)"
     ],
     "deny": [],
     "ask": []
