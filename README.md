@@ -25,10 +25,10 @@ A sleek desktop overlay tool for quick AI queries with screenshot context, voice
 │  └───────────────────────────────────────────────────────┘  │
 │    [Low][Mid][High]      [Screen 1 ▼]              [📷]     │
 └─────────────────────────────────────────────────────────────┘
-<img width="621" height="195" alt="image" src="https://github.com/user-attachments/assets/14c0c3ab-2a3f-45d8-85dd-dccd94e4ca50" />
+
 
 ```
-
+<img width="621" height="195" alt="image" src="https://github.com/user-attachments/assets/14c0c3ab-2a3f-45d8-85dd-dccd94e4ca50" />
 ## 🚀 Quick Start
 
 ### 1. Clone & Install
