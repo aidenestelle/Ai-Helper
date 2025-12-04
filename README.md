@@ -24,7 +24,7 @@ A sleek desktop overlay tool for quick AI queries with screenshot context, voice
 ### Option A: One-Click Setup (Windows)
 
 ```bash
-git clone https://github.com/yourusername/helper-ai.git
+git clone https://github.com/aidenestelle/Ai-Helper.git
 cd helper-ai
 ```
 
@@ -35,7 +35,7 @@ Then double-click **`setup.bat`** - it handles everything automatically!
 #### 1. Clone & Install
 
 ```bash
-git clone https://github.com/yourusername/helper-ai.git
+git clone https://github.com/aidenestelle/Ai-Helper.git
 cd helper-ai
 python -m venv .venv
 .venv\Scripts\activate  # Windows
