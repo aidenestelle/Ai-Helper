@@ -13,13 +13,14 @@ DEFAULT_SETTINGS = {
     "selected_monitor": 1,
     "voice_mode": "toggle",  # "toggle" or "push_to_talk"
     "voice_hotkey": "ctrl+shift+v",
-    "sessions": {}
+    "sessions": {},
+    "setup_complete": False
 }
 
 def load_settings():
     if not os.path.exists(SETTINGS_FILE):
         save_settings(DEFAULT_SETTINGS)
-        return DEFAULT_SETTINGS
+        return DEFAULT_SETTINGS.copy()
     
     try:
         with open(SETTINGS_FILE, "r") as f:
@@ -39,6 +40,10 @@ def load_settings():
                 settings["voice_hotkey"] = "ctrl+shift+v"
             if "sessions" not in settings:
                 settings["sessions"] = {}
+            if "setup_complete" not in settings:
+                # Existing users who have settings already should not see first-run
+                settings["setup_complete"] = True
+                save_settings(settings)
             return settings
     except Exception as e:
         print(f"Error loading settings: {e}")
@@ -149,4 +154,14 @@ def get_selected_monitor():
 def set_selected_monitor(monitor):
     settings = load_settings()
     settings["selected_monitor"] = monitor
+    save_settings(settings)
+
+def is_first_run():
+    """Check if this is the first time running the app."""
+    return not load_settings().get("setup_complete", False)
+
+def set_setup_complete(complete=True):
+    """Mark initial setup as complete."""
+    settings = load_settings()
+    settings["setup_complete"] = complete
     save_settings(settings)

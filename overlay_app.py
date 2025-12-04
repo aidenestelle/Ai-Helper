@@ -7,6 +7,141 @@ import n8n_client
 import settings_manager
 import voice_utils
 
+
+class HotkeyCapture(ctk.CTkFrame):
+    """Widget for capturing hotkey input with a Set button."""
+
+    def __init__(self, parent, initial_value="", **kwargs):
+        super().__init__(parent, fg_color="transparent", **kwargs)
+
+        self.hotkey_value = initial_value
+        self.is_capturing = False
+        self.pressed_keys = set()
+        self.capture_hook = None
+
+        # Layout
+        self.grid_columnconfigure(0, weight=1)
+
+        # Display current hotkey
+        self.hotkey_display = ctk.CTkLabel(
+            self,
+            text=initial_value or "(not set)",
+            fg_color="gray20",
+            corner_radius=5,
+            height=32,
+            anchor="center"
+        )
+        self.hotkey_display.grid(row=0, column=0, sticky="ew", padx=(0, 5))
+
+        # Set button
+        self.set_btn = ctk.CTkButton(
+            self,
+            text="Set",
+            width=60,
+            command=self.start_capture
+        )
+        self.set_btn.grid(row=0, column=1)
+
+    def start_capture(self):
+        """Start capturing hotkey input."""
+        if self.is_capturing:
+            return
+
+        self.is_capturing = True
+        self.pressed_keys = set()
+        self.set_btn.configure(text="...", state="disabled")
+        self.hotkey_display.configure(text="Press keys...")
+
+        # Hook keyboard events
+        self.capture_hook = keyboard.hook(self._on_key_event, suppress=False)
+
+    def _on_key_event(self, event):
+        """Handle keyboard events during capture."""
+        if not self.is_capturing:
+            return
+
+        if event.event_type == "down":
+            # Normalize key name
+            key = event.name.lower()
+            # Handle modifiers
+            if key in ["ctrl", "control", "left ctrl", "right ctrl"]:
+                key = "ctrl"
+            elif key in ["alt", "left alt", "right alt"]:
+                key = "alt"
+            elif key in ["shift", "left shift", "right shift"]:
+                key = "shift"
+            elif key in ["windows", "left windows", "right windows", "win"]:
+                key = "win"
+
+            self.pressed_keys.add(key)
+            self._update_display()
+
+        elif event.event_type == "up":
+            # When any key is released, finalize the capture
+            if self.pressed_keys:
+                self.after(50, self._finalize_capture)
+
+    def _update_display(self):
+        """Update the display with current pressed keys."""
+        parts = []
+
+        # Add modifiers first in order
+        for mod in ["ctrl", "alt", "shift", "win"]:
+            if mod in self.pressed_keys:
+                parts.append(mod)
+
+        # Add other keys
+        for key in sorted(self.pressed_keys):
+            if key not in ["ctrl", "alt", "shift", "win"]:
+                parts.append(key)
+
+        display_text = "+".join(parts) if parts else "Press keys..."
+        self.hotkey_display.configure(text=display_text)
+
+    def _finalize_capture(self):
+        """Finalize the hotkey capture."""
+        if not self.is_capturing:
+            return
+
+        self.is_capturing = False
+
+        # Unhook keyboard
+        if self.capture_hook:
+            keyboard.unhook(self.capture_hook)
+            self.capture_hook = None
+
+        # Build hotkey string
+        parts = []
+
+        # Add modifiers first in order
+        for mod in ["ctrl", "alt", "shift", "win"]:
+            if mod in self.pressed_keys:
+                parts.append(mod)
+
+        # Add other keys
+        for key in sorted(self.pressed_keys):
+            if key not in ["ctrl", "alt", "shift", "win"]:
+                parts.append(key)
+
+        if parts:
+            self.hotkey_value = "+".join(parts)
+            self.hotkey_display.configure(text=self.hotkey_value)
+        else:
+            self.hotkey_display.configure(text=self.hotkey_value or "(not set)")
+
+        self.set_btn.configure(text="Set", state="normal")
+        self.pressed_keys = set()
+
+    def get(self):
+        """Get the current hotkey value."""
+        return self.hotkey_value
+
+    def set(self, value):
+        """Set the hotkey value."""
+        self.hotkey_value = value
+        self.hotkey_display.configure(text=value or "(not set)")
+
+
 class OverlayApp(ctk.CTk):
     def __init__(self, update_hotkey_callback=None):
         super().__init__()
@@ -208,16 +343,20 @@ class OverlayApp(ctk.CTk):
         self.progress_bar = ctk.CTkProgressBar(self.input_frame, height=3)
         self.progress_bar.set(0)
 
-        self.is_visible = False
+        self.is_visible = True
         self.settings_window = None
         self.history_window = None
         self.current_session_id = None
         self.chat_messages = []  # Track current conversation
         self.voice_hotkey_id = None
-        self.withdraw() # Start hidden
-        
+        self.setup_window = None
+
         # Register voice hotkey
         self.register_voice_hotkey(settings_manager.get_voice_hotkey())
+
+        # Check for first-time setup
+        if settings_manager.is_first_run():
+            self.after(100, self.show_first_run_setup)
 
     def register_voice_hotkey(self, hotkey):
         """Register or update the voice hotkey."""
@@ -565,65 +704,149 @@ class OverlayApp(ctk.CTk):
 
         self.settings_window = ctk.CTkToplevel(self)
         self.settings_window.title("Settings")
-        self.settings_window.geometry("400x380")
+        self.settings_window.geometry("420x400")
         self.settings_window.attributes("-topmost", True)
         self.settings_window.protocol("WM_DELETE_WINDOW", self.close_settings)
-        
-        # Hotkey
-        ctk.CTkLabel(self.settings_window, text="Overlay Hotkey:").pack(pady=(10, 0))
-        current_hotkey = settings_manager.get_hotkey()
-        hotkey_entry = ctk.CTkEntry(self.settings_window)
-        hotkey_entry.insert(0, current_hotkey)
-        hotkey_entry.pack(pady=5)
+
+        # Content frame with padding
+        content = ctk.CTkFrame(self.settings_window, fg_color="transparent")
+        content.pack(fill="both", expand=True, padx=20, pady=10)
+
+        # Overlay Hotkey with capture widget
+        ctk.CTkLabel(content, text="Overlay Hotkey:", anchor="w").pack(fill="x", pady=(10, 5))
+        hotkey_capture = HotkeyCapture(content, initial_value=settings_manager.get_hotkey())
+        hotkey_capture.pack(fill="x", pady=(0, 10))
 
         # Webhook URL
-        ctk.CTkLabel(self.settings_window, text="Webhook URL:").pack(pady=(10, 0))
-        current_url = settings_manager.get_webhook_url()
-        url_entry = ctk.CTkEntry(self.settings_window, width=300)
-        url_entry.insert(0, current_url)
-        url_entry.pack(pady=5)
-        
+        ctk.CTkLabel(content, text="Webhook URL:", anchor="w").pack(fill="x", pady=(10, 5))
+        url_entry = ctk.CTkEntry(content, width=350)
+        url_entry.insert(0, settings_manager.get_webhook_url())
+        url_entry.pack(fill="x", pady=(0, 10))
+
         # Voice Mode
-        ctk.CTkLabel(self.settings_window, text="Voice Mode:").pack(pady=(10, 0))
+        ctk.CTkLabel(content, text="Voice Mode:", anchor="w").pack(fill="x", pady=(10, 5))
         voice_mode_var = ctk.StringVar(value=settings_manager.get_voice_mode())
         voice_mode_menu = ctk.CTkSegmentedButton(
-            self.settings_window,
+            content,
             values=["toggle", "push_to_talk"],
             variable=voice_mode_var
         )
-        voice_mode_menu.pack(pady=5)
-        
-        # Voice Hotkey
-        ctk.CTkLabel(self.settings_window, text="Voice Hotkey:").pack(pady=(10, 0))
-        voice_hotkey_entry = ctk.CTkEntry(self.settings_window)
-        voice_hotkey_entry.insert(0, settings_manager.get_voice_hotkey())
-        voice_hotkey_entry.pack(pady=5)
-        
+        voice_mode_menu.pack(fill="x", pady=(0, 10))
+
+        # Voice Hotkey with capture widget
+        ctk.CTkLabel(content, text="Voice Hotkey:", anchor="w").pack(fill="x", pady=(10, 5))
+        voice_hotkey_capture = HotkeyCapture(content, initial_value=settings_manager.get_voice_hotkey())
+        voice_hotkey_capture.pack(fill="x", pady=(0, 10))
+
         def save():
-            new_hotkey = hotkey_entry.get()
+            new_hotkey = hotkey_capture.get()
             new_url = url_entry.get()
             new_voice_mode = voice_mode_var.get()
-            new_voice_hotkey = voice_hotkey_entry.get()
-            
+            new_voice_hotkey = voice_hotkey_capture.get()
+
             settings_manager.set_hotkey(new_hotkey)
             settings_manager.set_webhook_url(new_url)
             settings_manager.set_voice_mode(new_voice_mode)
             settings_manager.set_voice_hotkey(new_voice_hotkey)
-            
+
             if self.update_hotkey_callback:
                 self.update_hotkey_callback(new_hotkey)
-            
+
             # Update voice hotkey
             self.register_voice_hotkey(new_voice_hotkey)
-            
+
             self.close_settings()
-            
-        ctk.CTkButton(self.settings_window, text="Save", command=save).pack(pady=20)
+
+        ctk.CTkButton(content, text="Save", command=save).pack(pady=20)
 
     def close_settings(self):
         if self.settings_window:
             self.settings_window.destroy()
             self.settings_window = None
+
+    def show_first_run_setup(self):
+        """Show first-time setup wizard for configuring hotkeys."""
+        if self.setup_window is not None and self.setup_window.winfo_exists():
+            return
+
+        self.setup_window = ctk.CTkToplevel(self)
+        self.setup_window.title("Welcome to Helper AI")
+        self.setup_window.geometry("450x380")
+        self.setup_window.attributes("-topmost", True)
+        self.setup_window.protocol("WM_DELETE_WINDOW", lambda: None)  # Prevent closing
+        self.setup_window.grab_set()  # Make modal
+
+        # Center the window
+        self.setup_window.update_idletasks()
+        x = (self.setup_window.winfo_screenwidth() - 450) // 2
+        y = (self.setup_window.winfo_screenheight() - 380) // 2
+        self.setup_window.geometry(f"+{x}+{y}")
+
+        # Content
+        content = ctk.CTkFrame(self.setup_window, fg_color="transparent")
+        content.pack(fill="both", expand=True, padx=30, pady=20)
+
+        # Title
+        title = ctk.CTkLabel(
+            content,
+            text="Welcome to Helper AI!",
+            font=("Arial", 20, "bold")
+        )
+        title.pack(pady=(0, 10))
+
+        # Description
+        desc = ctk.CTkLabel(
+            content,
+            text="Let's set up your hotkeys to get started.\nClick 'Set' and press the key combination you want to use.",
+            font=("Arial", 12),
+            text_color="gray"
+        )
+        desc.pack(pady=(0, 20))
+
+        # Overlay Hotkey
+        ctk.CTkLabel(content, text="Overlay Hotkey (show/hide this window):", anchor="w").pack(fill="x", pady=(10, 5))
+        overlay_hotkey = HotkeyCapture(content, initial_value=settings_manager.get_hotkey())
+        overlay_hotkey.pack(fill="x", pady=(0, 15))
+
+        # Voice Hotkey
+        ctk.CTkLabel(content, text="Voice Hotkey (start voice input):", anchor="w").pack(fill="x", pady=(10, 5))
+        voice_hotkey = HotkeyCapture(content, initial_value=settings_manager.get_voice_hotkey())
+        voice_hotkey.pack(fill="x", pady=(0, 20))
+
+        def complete_setup():
+            # Save hotkeys
+            new_overlay = overlay_hotkey.get()
+            new_voice = voice_hotkey.get()
+
+            if new_overlay:
+                settings_manager.set_hotkey(new_overlay)
+                if self.update_hotkey_callback:
+                    self.update_hotkey_callback(new_overlay)
+
+            if new_voice:
+                settings_manager.set_voice_hotkey(new_voice)
+                self.register_voice_hotkey(new_voice)
+
+            # Mark setup as complete
+            settings_manager.set_setup_complete(True)
+
+            # Close setup window
+            self.setup_window.grab_release()
+            self.setup_window.destroy()
+            self.setup_window = None
+
+            # Focus main window
+            self.entry.focus_set()
+
+        # Complete button
+        complete_btn = ctk.CTkButton(
+            content,
+            text="Get Started",
+            font=("Arial", 14),
+            height=40,
+            command=complete_setup
+        )
+        complete_btn.pack(pady=20)
 
     def show_history(self):
         if self.history_window is not None and self.history_window.winfo_exists():
