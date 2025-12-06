@@ -1,6 +1,7 @@
 import customtkinter as ctk
 import threading
 import keyboard
+import re
 import config
 import screenshot_utils
 import n8n_client
@@ -149,200 +150,206 @@ class OverlayApp(ctk.CTk):
 
         self.update_hotkey_callback = update_hotkey_callback
         self.title("Helper AI Overlay")
-        self.geometry(f"{config.WINDOW_WIDTH}x{config.WINDOW_HEIGHT_INITIAL}")
+
+        # Load saved window size
+        saved_width, saved_height = settings_manager.get_window_size()
+        self.geometry(f"{saved_width}x{saved_height}")
         self.overrideredirect(True) # Frameless window
         self.attributes("-topmost", True)
         self.attributes("-alpha", 0.95)  # Slight transparency
-        self.resizable(False, False)
-        
+        self.resizable(True, True)  # Allow resizing
+        self.minsize(500, config.WINDOW_HEIGHT_INITIAL)  # Minimum size
+
         # Center the window roughly
         screen_width = self.winfo_screenwidth()
         screen_height = self.winfo_screenheight()
-        x = (screen_width - config.WINDOW_WIDTH) // 2
+        x = (screen_width - saved_width) // 2
         y = (screen_height // 3) # Position in upper third
         self.geometry(f"+{x}+{y}")
+
+        # Track resize for saving
+        self.bind("<Configure>", self._on_resize)
 
         # Theme
         ctk.set_appearance_mode("Dark")
         ctk.set_default_color_theme("blue")
 
-        # Configure main grid
+        # Configure main grid - chat expands, header and input fixed
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(1, weight=0)  # Input row
-        self.grid_rowconfigure(2, weight=1)  # Result row (expandable)
+        self.grid_rowconfigure(0, weight=0)  # Header (fixed)
+        self.grid_rowconfigure(1, weight=1)  # Chat (expands)
+        self.grid_rowconfigure(2, weight=0)  # Input (fixed at bottom)
 
-        # Drag functionality
-        self.bind("<ButtonPress-1>", self.start_move)
-        self.bind("<ButtonRelease-1>", self.stop_move)
-        self.bind("<B1-Motion>", self.do_move)
-        self.x = 0
-        self.y = 0
+        # Drag and resize functionality
+        self._drag_data = {"x": 0, "y": 0, "resizing": None}
+        self._resize_edge_size = 8  # pixels from edge to trigger resize
+        self.bind("<ButtonPress-1>", self._on_mouse_down)
+        self.bind("<ButtonRelease-1>", self._on_mouse_up)
+        self.bind("<B1-Motion>", self._on_mouse_drag)
+        self.bind("<Motion>", self._on_mouse_move)
 
-        # ============ ROW 0: TOP TOOLBAR ============
-        self.toolbar_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.toolbar_frame.grid(row=0, column=0, sticky="ew", padx=15, pady=(10, 5))
-        self.toolbar_frame.grid_columnconfigure(1, weight=1)  # Spacer
+        # ============ MAIN CONTAINER ============
+        self.main_container = ctk.CTkFrame(self, fg_color="transparent")
+        self.main_container.grid(row=0, column=0, rowspan=3, sticky="nsew", padx=10, pady=8)
+        self.main_container.grid_columnconfigure(0, weight=1)
+        self.main_container.grid_rowconfigure(1, weight=1)  # Chat row expands
 
-        # Left: New Chat button
-        self.new_chat_btn = ctk.CTkButton(
-            self.toolbar_frame, 
-            text="+ New Chat", 
-            width=90, 
-            height=28,
-            font=("Arial", 12),
-            command=self.new_chat
+        # ============ ROW 0: HEADER BAR (all controls) ============
+        self.header_frame = ctk.CTkFrame(self.main_container, fg_color="transparent", height=32)
+        self.header_frame.grid(row=0, column=0, sticky="ew", pady=(0, 6))
+        self.header_frame.grid_columnconfigure(1, weight=1)
+        self.header_frame.grid_propagate(False)
+
+        # Left section: Actions
+        self.header_left = ctk.CTkFrame(self.header_frame, fg_color="transparent")
+        self.header_left.grid(row=0, column=0, sticky="w")
+
+        # Settings button (far left)
+        self.settings_btn = ctk.CTkButton(
+            self.header_left, text="⚙", width=24, height=24,
+            font=("Arial", 12), fg_color="transparent", hover_color="#333",
+            corner_radius=5, command=self.open_settings
         )
-        self.new_chat_btn.grid(row=0, column=0, sticky="w")
+        self.settings_btn.pack(side="left", padx=(0, 8))
 
-        # Right: History + Settings + Hide + Close
-        self.right_toolbar = ctk.CTkFrame(self.toolbar_frame, fg_color="transparent")
-        self.right_toolbar.grid(row=0, column=2, sticky="e")
+        # New Chat button
+        self.new_chat_btn = ctk.CTkButton(
+            self.header_left, text="New", width=50, height=24,
+            font=("Arial", 11), fg_color="#3b82f6", hover_color="#2563eb",
+            corner_radius=5, command=self.new_chat
+        )
+        self.new_chat_btn.pack(side="left", padx=(0, 4))
 
+        # History button
         self.history_btn = ctk.CTkButton(
-            self.right_toolbar,
-            text="History",
-            width=70,
-            height=28,
-            font=("Arial", 12),
-            fg_color="transparent",
-            border_width=1,
+            self.header_left, text="History", width=55, height=24,
+            font=("Arial", 11), fg_color="transparent", border_width=1,
+            border_color="#444", hover_color="#333", corner_radius=5,
             command=self.show_history
         )
-        self.history_btn.pack(side="left", padx=(0, 5))
+        self.history_btn.pack(side="left", padx=(0, 8))
 
-        self.settings_btn = ctk.CTkButton(
-            self.right_toolbar,
-            text="⚙",
-            width=28,
-            height=28,
-            command=self.open_settings
-        )
-        self.settings_btn.pack(side="left", padx=(0, 5))
+        # Complexity toggle with label
+        ctk.CTkLabel(
+            self.header_left, text="Quality:", font=("Arial", 10),
+            text_color="gray"
+        ).pack(side="left", padx=(0, 3))
 
-        self.hide_btn = ctk.CTkButton(
-            self.right_toolbar,
-            text="👁",
-            width=28,
-            height=28,
-            fg_color="gray30",
-            hover_color="gray40",
-            command=self.hide_overlay
-        )
-        self.hide_btn.pack(side="left", padx=(0, 5))
-
-        self.close_btn = ctk.CTkButton(
-            self.right_toolbar,
-            text="✕",
-            width=28,
-            height=28,
-            fg_color="#dc3545",
-            hover_color="#c82333",
-            command=self.close_app
-        )
-        self.close_btn.pack(side="left")
-
-        # ============ ROW 1: INPUT WITH EMBEDDED SEND ============
-        self.input_frame = ctk.CTkFrame(self, corner_radius=10)
-        self.input_frame.grid(row=1, column=0, sticky="ew", padx=15, pady=5)
-        self.input_frame.grid_columnconfigure(0, weight=1)
-
-        self.entry = ctk.CTkEntry(
-            self.input_frame, 
-            placeholder_text="Ask a question...", 
-            height=45, 
-            font=("Arial", 14),
-            border_width=0
-        )
-        self.entry.grid(row=0, column=0, sticky="ew", padx=(10, 0), pady=5)
-        self.entry.bind("<Return>", self.on_submit)
-        self.entry.bind("<Escape>", self.hide_overlay)
-
-        # Mic Button
-        self.mic_btn = ctk.CTkButton(
-            self.input_frame, 
-            text="🎤", 
-            width=40, 
-            height=35,
-            font=("Arial", 16),
-            fg_color="gray30",
-            command=self.toggle_recording
-        )
-        self.mic_btn.grid(row=0, column=1, padx=(5, 0), pady=5)
-
-        # Send Button
-        self.send_btn = ctk.CTkButton(
-            self.input_frame, 
-            text="➤", 
-            width=40, 
-            height=35,
-            font=("Arial", 16),
-            command=self.on_submit
-        )
-        self.send_btn.grid(row=0, column=2, padx=5, pady=5)
-
-        self.is_recording = False
-        self.is_ptt_recording = False  # Track push-to-talk for auto-send
-
-        # ============ ROW 2: BOTTOM CONTROLS ============
-        self.controls_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.controls_frame.grid(row=2, column=0, sticky="ew", padx=15, pady=(5, 10))
-        self.controls_frame.grid_columnconfigure(1, weight=1)  # Spacer
-
-        # Left: Complexity Segmented Button
         self.complexity_var = ctk.StringVar(value="Low")
         self.complexity_segment = ctk.CTkSegmentedButton(
-            self.controls_frame,
-            values=["Low", "High"],
-            variable=self.complexity_var,
-            font=("Arial", 12)
+            self.header_left, values=["Low", "High"],
+            variable=self.complexity_var, font=("Arial", 10),
+            height=24, corner_radius=5, width=90
         )
-        self.complexity_segment.grid(row=0, column=0, sticky="w")
+        self.complexity_segment.pack(side="left", padx=(0, 8))
 
-        # Center: Monitor Selection
+        # Monitor selection with label
+        ctk.CTkLabel(
+            self.header_left, text="Monitor:", font=("Arial", 10),
+            text_color="gray"
+        ).pack(side="left", padx=(0, 3))
+
         monitors = screenshot_utils.get_monitors()
         self.monitor_names = [m["name"] for m in monitors]
         self.monitor_map = {m["name"]: m["index"] for m in monitors}
-        
         saved_monitor = settings_manager.get_selected_monitor()
         saved_name = f"Screen {saved_monitor}" if f"Screen {saved_monitor}" in self.monitor_names else self.monitor_names[0]
         self.monitor_var = ctk.StringVar(value=saved_name)
-        
+
         self.monitor_menu = ctk.CTkOptionMenu(
-            self.controls_frame,
-            values=self.monitor_names,
-            variable=self.monitor_var,
-            command=self.on_monitor_select,
-            width=90,
-            font=("Arial", 11)
+            self.header_left, values=self.monitor_names,
+            variable=self.monitor_var, command=self.on_monitor_select,
+            width=75, height=24, font=("Arial", 10),
+            fg_color="#333", button_color="#444", button_hover_color="#555",
+            corner_radius=5
         )
-        self.monitor_menu.grid(row=0, column=1, padx=10)
+        self.monitor_menu.pack(side="left", padx=(0, 8))
 
         self.highlight_window = None
         self._dropdown_bindings_set = False
-
-        # Bind to detect when dropdown opens
         self.monitor_menu.bind("<Button-1>", self._on_dropdown_click)
 
-        # Right: Screenshot Toggle
+        # Screen share toggle with label
+        ctk.CTkLabel(
+            self.header_left, text="Share:", font=("Arial", 10),
+            text_color="gray"
+        ).pack(side="left", padx=(0, 3))
+
         self.screenshot_var = ctk.BooleanVar(value=settings_manager.get_include_screenshot())
         self.screenshot_switch = ctk.CTkSwitch(
-            self.controls_frame, 
-            text="📷", 
-            variable=self.screenshot_var, 
-            command=self.toggle_screenshot_setting,
-            font=("Arial", 12)
+            self.header_left, text="", variable=self.screenshot_var,
+            command=self.toggle_screenshot_setting, width=36, height=20,
+            switch_width=32, switch_height=16
         )
-        self.screenshot_switch.grid(row=0, column=2, sticky="e")
+        self.screenshot_switch.pack(side="left")
 
-        # ============ RESULT FRAME (Hidden initially) ============
-        self.result_frame = ctk.CTkFrame(self, corner_radius=10)
-        self.result_textbox = ctk.CTkTextbox(self.result_frame, font=("Arial", 12), wrap="word")
-        self.result_textbox.pack(fill="both", expand=True, padx=10, pady=10)
-        
-        self.retry_btn = ctk.CTkButton(self.result_frame, text="Retry", command=self.on_submit)
+        # Right section: Window controls
+        self.header_right = ctk.CTkFrame(self.header_frame, fg_color="transparent")
+        self.header_right.grid(row=0, column=2, sticky="e")
 
-        # Loading Indicator (will be shown in input_frame)
-        self.progress_bar = ctk.CTkProgressBar(self.input_frame, height=3)
+        # Window control buttons (— then ✕ on far right)
+        self.hide_btn = ctk.CTkButton(
+            self.header_right, text="—", width=24, height=24,
+            font=("Arial", 12, "bold"), fg_color="transparent", hover_color="#444",
+            corner_radius=5, command=self.hide_overlay
+        )
+        self.hide_btn.pack(side="left", padx=(0, 2))
+
+        self.close_btn = ctk.CTkButton(
+            self.header_right, text="✕", width=24, height=24,
+            font=("Arial", 12), fg_color="transparent", hover_color="#dc3545",
+            corner_radius=5, command=self.close_app
+        )
+        self.close_btn.pack(side="left")
+
+        # ============ ROW 1: CHAT AREA (expands) ============
+        self.result_frame = ctk.CTkFrame(self.main_container, corner_radius=8, fg_color="#232323")
+        # Hidden initially - will be shown via display_chat()
+
+        self.result_textbox = ctk.CTkTextbox(
+            self.result_frame, font=("Arial", 12), wrap="word",
+            fg_color="transparent", scrollbar_button_color="#444"
+        )
+        self.result_textbox.pack(fill="both", expand=True, padx=8, pady=8)
+
+        self.retry_btn = ctk.CTkButton(
+            self.result_frame, text="Retry", width=60, height=24,
+            font=("Arial", 11), fg_color="#dc3545", hover_color="#c82333",
+            command=self.on_submit
+        )
+
+        # ============ ROW 2: INPUT (sticky bottom) ============
+        self.input_frame = ctk.CTkFrame(self.main_container, corner_radius=8, fg_color="#2a2a2a")
+        self.input_frame.grid(row=2, column=0, sticky="ew", pady=(6, 0))
+        self.input_frame.grid_columnconfigure(0, weight=1)
+
+        self.entry = ctk.CTkEntry(
+            self.input_frame, placeholder_text="Ask anything...",
+            height=38, font=("Arial", 13), border_width=0, fg_color="transparent"
+        )
+        self.entry.grid(row=0, column=0, sticky="ew", padx=(12, 0), pady=4)
+        self.entry.bind("<Return>", self.on_submit)
+        self.entry.bind("<Escape>", self.hide_overlay)
+
+        self.mic_btn = ctk.CTkButton(
+            self.input_frame, text="🎤", width=32, height=28,
+            font=("Arial", 13), fg_color="transparent", hover_color="#444",
+            corner_radius=5, command=self.toggle_recording
+        )
+        self.mic_btn.grid(row=0, column=1, padx=2, pady=4)
+
+        self.send_btn = ctk.CTkButton(
+            self.input_frame, text="↑", width=32, height=28,
+            font=("Arial", 14, "bold"), fg_color="#3b82f6", hover_color="#2563eb",
+            corner_radius=5, command=self.on_submit
+        )
+        self.send_btn.grid(row=0, column=2, padx=(2, 6), pady=4)
+
+        self.is_recording = False
+        self.is_ptt_recording = False
+
+        # Loading bar (hidden by default)
+        self.progress_bar = ctk.CTkProgressBar(self.input_frame, height=2, corner_radius=0)
         self.progress_bar.set(0)
 
         self.is_visible = True
@@ -395,30 +402,171 @@ class OverlayApp(ctk.CTk):
     def _start_ptt_recording(self):
         self.is_recording = True
         self.is_ptt_recording = True  # Track that this is PTT mode
-        self.mic_btn.configure(fg_color="red", text="⏹")
+        self.mic_btn.configure(fg_color="#ef4444", text="⏹")
         self.entry.configure(placeholder_text="Listening...")
         voice_utils.start_recording(callback=self.on_transcription)
 
     def _stop_ptt_recording(self):
         self.is_recording = False
-        self.mic_btn.configure(fg_color="orange", text="...")
+        self.mic_btn.configure(fg_color="#f59e0b", text="...")
         self.entry.configure(placeholder_text="Transcribing...")
         voice_utils.stop_recording()
 
-    def start_move(self, event):
-        self.x = event.x
-        self.y = event.y
+    def _get_resize_edge(self, x, y):
+        """Determine which edge/corner the mouse is near for resizing."""
+        w, h = self.winfo_width(), self.winfo_height()
+        edge = self._resize_edge_size
 
-    def stop_move(self, event):
-        self.x = None
-        self.y = None
+        on_left = x < edge
+        on_right = x > w - edge
+        on_top = y < edge
+        on_bottom = y > h - edge
 
-    def do_move(self, event):
-        deltax = event.x - self.x
-        deltay = event.y - self.y
-        x = self.winfo_x() + deltax
-        y = self.winfo_y() + deltay
-        self.geometry(f"+{x}+{y}")
+        if on_bottom and on_right:
+            return "se"
+        elif on_bottom and on_left:
+            return "sw"
+        elif on_top and on_right:
+            return "ne"
+        elif on_top and on_left:
+            return "nw"
+        elif on_bottom:
+            return "s"
+        elif on_right:
+            return "e"
+        elif on_left:
+            return "w"
+        elif on_top:
+            return "n"
+        return None
+
+    def _on_mouse_move(self, event):
+        """Update cursor based on position near edges."""
+        edge = self._get_resize_edge(event.x, event.y)
+        cursors = {
+            "se": "size_nw_se", "nw": "size_nw_se",
+            "sw": "size_ne_sw", "ne": "size_ne_sw",
+            "s": "size_ns", "n": "size_ns",
+            "e": "size_we", "w": "size_we",
+            None: ""
+        }
+        self.configure(cursor=cursors.get(edge, ""))
+
+    def _on_mouse_down(self, event):
+        """Handle mouse button press - start drag or resize."""
+        # Check if click is in the chat area - don't allow drag from there
+        try:
+            widget = event.widget.winfo_containing(event.x_root, event.y_root)
+            if widget == self.result_textbox or widget == self.result_frame:
+                self._drag_data["allow_drag"] = False
+                return
+            # Check if widget is a child of result_frame
+            parent = widget
+            while parent:
+                if parent == self.result_frame:
+                    self._drag_data["allow_drag"] = False
+                    return
+                parent = parent.master if hasattr(parent, 'master') else None
+        except:
+            pass
+
+        self._drag_data["allow_drag"] = True
+        edge = self._get_resize_edge(event.x, event.y)
+        self._drag_data["resizing"] = edge
+        self._drag_data["x"] = event.x
+        self._drag_data["y"] = event.y
+        self._drag_data["win_x"] = self.winfo_x()
+        self._drag_data["win_y"] = self.winfo_y()
+        self._drag_data["win_w"] = self.winfo_width()
+        self._drag_data["win_h"] = self.winfo_height()
+
+    def _on_mouse_up(self, event):
+        """Handle mouse button release."""
+        self._drag_data["resizing"] = None
+
+    def _on_mouse_drag(self, event):
+        """Handle mouse drag - move window or resize."""
+        # Don't drag if click was in chat area
+        if not self._drag_data.get("allow_drag", True):
+            return
+
+        edge = self._drag_data["resizing"]
+
+        if edge is None:
+            # Regular window drag
+            deltax = event.x - self._drag_data["x"]
+            deltay = event.y - self._drag_data["y"]
+            x = self.winfo_x() + deltax
+            y = self.winfo_y() + deltay
+            self.geometry(f"+{x}+{y}")
+        else:
+            # Resize based on edge
+            dx = event.x_root - (self._drag_data["win_x"] + self._drag_data["x"])
+            dy = event.y_root - (self._drag_data["win_y"] + self._drag_data["y"])
+
+            new_x = self._drag_data["win_x"]
+            new_y = self._drag_data["win_y"]
+            new_w = self._drag_data["win_w"]
+            new_h = self._drag_data["win_h"]
+
+            min_w, min_h = 500, config.WINDOW_HEIGHT_INITIAL
+
+            if "e" in edge:
+                new_w = max(min_w, self._drag_data["win_w"] + dx)
+            if "w" in edge:
+                delta = min(dx, self._drag_data["win_w"] - min_w)
+                new_x = self._drag_data["win_x"] + delta
+                new_w = self._drag_data["win_w"] - delta
+            if "s" in edge:
+                new_h = max(min_h, self._drag_data["win_h"] + dy)
+            if "n" in edge:
+                delta = min(dy, self._drag_data["win_h"] - min_h)
+                new_y = self._drag_data["win_y"] + delta
+                new_h = self._drag_data["win_h"] - delta
+
+            self.geometry(f"{int(new_w)}x{int(new_h)}+{int(new_x)}+{int(new_y)}")
+
+    def _on_resize(self, event):
+        """Save window size when resized."""
+        # Only save if it's the main window and size actually changed
+        if event.widget == self and event.width > 0 and event.height > 0:
+            # Debounce: use after_cancel/after pattern
+            if hasattr(self, '_resize_after_id'):
+                self.after_cancel(self._resize_after_id)
+            self._resize_after_id = self.after(500, lambda: self._save_window_size(event.width, event.height))
+
+    def _save_window_size(self, width, height):
+        """Actually save the window size to settings."""
+        settings_manager.set_window_size(width, height)
+
+    def _strip_markdown(self, text):
+        """Strip markdown formatting symbols for TTS readability."""
+        # Remove headers (## Header)
+        text = re.sub(r'^#{1,6}\s*', '', text, flags=re.MULTILINE)
+        # Remove bold/italic (**text** or *text* or __text__ or _text_)
+        text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)
+        text = re.sub(r'\*([^*]+)\*', r'\1', text)
+        text = re.sub(r'__([^_]+)__', r'\1', text)
+        text = re.sub(r'_([^_]+)_', r'\1', text)
+        # Remove inline code (`code`)
+        text = re.sub(r'`([^`]+)`', r'\1', text)
+        # Remove code blocks (```...```)
+        text = re.sub(r'```[\s\S]*?```', '', text)
+        # Remove links [text](url) -> text
+        text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
+        # Remove images ![alt](url)
+        text = re.sub(r'!\[[^\]]*\]\([^)]+\)', '', text)
+        # Remove horizontal rules
+        text = re.sub(r'^[-*_]{3,}\s*$', '', text, flags=re.MULTILINE)
+        # Remove bullet points
+        text = re.sub(r'^\s*[-*+]\s+', '', text, flags=re.MULTILINE)
+        # Remove numbered lists prefix
+        text = re.sub(r'^\s*\d+\.\s+', '', text, flags=re.MULTILINE)
+        # Remove blockquotes
+        text = re.sub(r'^\s*>\s*', '', text, flags=re.MULTILINE)
+        # Clean up extra whitespace
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        return text.strip()
 
     def toggle_screenshot_setting(self):
         settings_manager.set_include_screenshot(self.screenshot_var.get())
@@ -515,13 +663,13 @@ class OverlayApp(ctk.CTk):
         if self.is_recording:
             # Stop recording
             self.is_recording = False
-            self.mic_btn.configure(fg_color="orange", text="...")
+            self.mic_btn.configure(fg_color="#f59e0b", text="...")
             self.entry.configure(placeholder_text="Transcribing...")
             voice_utils.stop_recording()
         else:
             # Start recording
             self.is_recording = True
-            self.mic_btn.configure(fg_color="red", text="⏹")
+            self.mic_btn.configure(fg_color="#ef4444", text="⏹")
             self.entry.configure(placeholder_text="Listening... (click to stop)")
             voice_utils.start_recording(callback=self.on_transcription)
 
@@ -533,8 +681,8 @@ class OverlayApp(ctk.CTk):
         was_ptt = self.is_ptt_recording
         self.is_recording = False
         self.is_ptt_recording = False
-        self.mic_btn.configure(fg_color="gray30", text="🎤")
-        self.entry.configure(placeholder_text="Ask a question...")
+        self.mic_btn.configure(fg_color="transparent", text="🎤")
+        self.entry.configure(placeholder_text="Ask anything...")
 
         if error:
             self.entry.delete(0, 'end')
@@ -555,10 +703,7 @@ class OverlayApp(ctk.CTk):
         self.deiconify()
         self.entry.focus_set()
         self.is_visible = True
-        # Don't clear entry if we are in a session and just hiding/showing
-        # But if it's a fresh start or we want to clear input, we can.
-        # For now, let's keep input if it wasn't submitted.
-        self.reset_ui()
+        # Don't reset UI - keep window size and chat state as is
 
     def hide_overlay(self, event=None):
         self.withdraw()
@@ -576,7 +721,8 @@ class OverlayApp(ctk.CTk):
         self.destroy()
 
     def reset_ui(self):
-        self.geometry(f"{config.WINDOW_WIDTH}x{config.WINDOW_HEIGHT_INITIAL}")
+        saved_width, _ = settings_manager.get_window_size()
+        self.geometry(f"{saved_width}x{config.WINDOW_HEIGHT_INITIAL}")
         self.result_frame.grid_forget()
         self.progress_bar.grid_forget()
         self.entry.configure(state="normal")
@@ -631,22 +777,25 @@ class OverlayApp(ctk.CTk):
 
         # Show loading state
         self.entry.configure(state="disabled")
-        self.send_btn.configure(state="disabled", text="...")
-        self.progress_bar.grid(row=1, column=0, sticky="ew", padx=5, pady=(0, 5))
+        self.send_btn.configure(state="disabled", text="·")
+        self.progress_bar.grid(row=1, column=0, columnspan=3, sticky="ew", padx=0, pady=0)
         self.progress_bar.start()
         self.retry_btn.pack_forget() # Hide retry button while loading
 
-        # Start background thread, passing the captured screenshot
-        threading.Thread(target=self.process_query, args=(query, screenshot_bytes, complexity, self.current_session_id), daemon=True).start()
+        # Get TTS enabled state for response format
+        tts_enabled = settings_manager.get_tts_enabled()
 
-    def process_query(self, query, screenshot_bytes, complexity, session_id):
+        # Start background thread, passing the captured screenshot and tts state
+        threading.Thread(target=self.process_query, args=(query, screenshot_bytes, complexity, self.current_session_id, tts_enabled), daemon=True).start()
+
+    def process_query(self, query, screenshot_bytes, complexity, session_id, tts_enabled):
         try:
             # If screenshot was requested but failed, we might still want to proceed?
             # Or if it wasn't requested, it is None.
             # n8n_client handles None.
-            
-            # Send to n8n
-            response = n8n_client.send_query(query, screenshot_bytes, complexity, session_id)
+
+            # Send to n8n with tts_enabled to control response format
+            response = n8n_client.send_query(query, screenshot_bytes, complexity, session_id, tts_enabled)
             
             # Save to history (session)
             settings_manager.save_interaction(session_id, query, response)
@@ -672,7 +821,7 @@ class OverlayApp(ctk.CTk):
             self.retry_btn.pack_forget()
 
         self.entry.configure(state="normal")
-        self.send_btn.configure(state="normal", text="➤")
+        self.send_btn.configure(state="normal", text="↑")
         self.entry.focus_set()
         # Clear entry to allow follow-up question
         if not is_error:
@@ -687,12 +836,15 @@ class OverlayApp(ctk.CTk):
         voice = settings_manager.get_tts_voice()
         speed = settings_manager.get_tts_speed()
 
+        # Strip markdown formatting for clean speech
+        clean_text = self._strip_markdown(text)
+
         def on_tts_complete(error):
             if error:
                 print(f"TTS Error: {error}")
 
         tts_utils.speak(
-            text=text,
+            text=clean_text,
             voice=voice,
             speed=speed,
             callback=on_tts_complete
@@ -704,8 +856,8 @@ class OverlayApp(ctk.CTk):
 
     def display_chat(self):
         """Display the full chat conversation."""
-        self.geometry(f"{config.WINDOW_WIDTH}x{config.WINDOW_HEIGHT_EXPANDED}")
-        self.result_frame.grid(row=3, column=0, sticky="nsew", padx=15, pady=(5, 15))
+        # Show chat frame in row 1 (between header and input)
+        self.result_frame.grid(row=1, column=0, sticky="nsew", pady=(0, 6))
 
         self.result_textbox.configure(state="normal")
         self.result_textbox.delete("0.0", "end")
@@ -715,15 +867,17 @@ class OverlayApp(ctk.CTk):
             content = msg.get("content", "")
 
             if role == "user":
-                self.result_textbox.insert("end", "You: ", "user_label")
-                self.result_textbox.insert("end", f"{content}\n\n")
+                self.result_textbox.insert("end", "You\n", "user_label")
+                self.result_textbox.insert("end", f"{content}\n\n", "user_msg")
             else:
-                self.result_textbox.insert("end", "AI: ", "ai_label")
-                self.result_textbox.insert("end", f"{content}\n\n")
+                self.result_textbox.insert("end", "AI\n", "ai_label")
+                self.result_textbox.insert("end", f"{content}\n\n", "ai_msg")
 
-        # Configure tags for styling
-        self.result_textbox.tag_config("user_label", foreground="#4da6ff")
-        self.result_textbox.tag_config("ai_label", foreground="#50fa7b")
+        # Configure tags for styling (CTkTextbox doesn't allow font in tag_config)
+        self.result_textbox.tag_config("user_label", foreground="#3b82f6")
+        self.result_textbox.tag_config("ai_label", foreground="#10b981")
+        self.result_textbox.tag_config("user_msg", foreground="#e5e5e5")
+        self.result_textbox.tag_config("ai_msg", foreground="#d1d5db")
 
         self.result_textbox.configure(state="disabled")
         # Scroll to bottom

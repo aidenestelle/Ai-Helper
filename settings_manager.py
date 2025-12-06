@@ -18,7 +18,10 @@ DEFAULT_SETTINGS = {
     # TTS Settings
     "tts_enabled": False,
     "tts_voice": "jenny",  # Voice name (jenny, guy, aria, etc.)
-    "tts_speed": 1.25  # Speech speed multiplier (0.5 to 2.0)
+    "tts_speed": 1.25,  # Speech speed multiplier (0.5 to 2.0)
+    # Window size memory
+    "window_width": config.WINDOW_WIDTH,
+    "window_height": config.WINDOW_HEIGHT_EXPANDED
 }
 
 def load_settings():
@@ -55,6 +58,11 @@ def load_settings():
                 settings["tts_voice"] = "jenny"
             if "tts_speed" not in settings:
                 settings["tts_speed"] = 1.25
+            # Window size settings
+            if "window_width" not in settings:
+                settings["window_width"] = config.WINDOW_WIDTH
+            if "window_height" not in settings:
+                settings["window_height"] = config.WINDOW_HEIGHT_EXPANDED
             return settings
     except Exception as e:
         print(f"Error loading settings: {e}")
@@ -200,4 +208,16 @@ def get_tts_speed():
 def set_tts_speed(speed):
     settings = load_settings()
     settings["tts_speed"] = speed
+    save_settings(settings)
+
+# Window size settings
+def get_window_size():
+    settings = load_settings()
+    return (settings.get("window_width", config.WINDOW_WIDTH),
+            settings.get("window_height", config.WINDOW_HEIGHT_EXPANDED))
+
+def set_window_size(width, height):
+    settings = load_settings()
+    settings["window_width"] = width
+    settings["window_height"] = height
     save_settings(settings)
